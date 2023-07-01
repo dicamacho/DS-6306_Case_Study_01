@@ -1,0 +1,181 @@
+---
+title: "Project I_B&B"
+author: "Erica Brooks"
+date: '2023-06-20'
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Load Libraries
+library(class)
+library(caret)
+library(e1071)
+library(tm)
+library(plyr)
+library(dbplyr)
+library(tidyverse)
+library(ggplot2)
+library(mapproj)
+library(maps)
+library(naniar)
+library(stringr)
+library(knitr)
+library(ggsn)
+library(usmap)
+```
+```{r}
+#Read in the Beers and Breweries data sets
+beerData = read.csv(file.choose(), header=TRUE)
+head(beerData)
+dim(beerData)
+
+breweryData = read.csv(file.choose(), header=TRUE)
+head(breweryData)
+dim(breweryData)
+```
+
+```{r}
+#Change the beer "Name" column in the beerData to "Beer_Name" 
+#Change the brewery "Name" column in the breweryData to "Brewery_Name"
+colnames(beerData)[1]="Beer_Name" 
+head(beerData)
+
+colnames(breweryData)[2] ="Brewery_Name"
+head(breweryData)
+```
+
+```{r}
+#Question_2 Merge Beer Data with Brewery Data; Outer Join
+BB.Data = merge(beerData, breweryData, by.x="Brewery_id", by.y="Brew_ID", all=TRUE)
+head(BB.Data)
+tail(BB.Data)
+dim(BB.Data)
+```
+
+```{r}
+#Question_3 Address the missing values in each column
+s=sapply(BB.Data, function(x) sum(is.na(x))) #count missing values in each column
+s
+gg_miss_var(BB.Data) #graphical view of missing values
+
+BB.Data$ABV <- replace(BB.Data$ABV, is.na(BB.Data$ABV), 0.0) #Impute the missing values in the ABV column with 0.0
+BB.Data$IBU <- replace(BB.Data$IBU, is.na(BB.Data$IBU), 0) #Impute the missing values (NA) in IBU column with 0
+gg_miss_var(BB.Data)
+
+```
+
+```{r}
+#Question_4 Compute the median alcohol content and the international bitterness for each state
+median.Data <- BB.Data %>% filter(!is.na(ABV)) %>% group_by(State) %>% summarize(medianABV = median(ABV, na.rm=TRUE), medianIBU = median(IBU, na.rm=TRUE))
+head(median.Data)
+
+median.Data <- median.Data %>% arrange(desc(medianABV)) #Sort the ABV column in ascending order
+
+
+#Plot the median data for the medianABV
+median.Data %>% ggplot(aes(x=State))+
+  geom_bar(aes(y=medianABV), fill="red", stat="identity")+
+  xlab("State")+
+  ylab("ABV")+
+  ggtitle("Median ABV by State")+
+  geom_text(aes(y=medianABV, label = medianABV), size = 1, vjust = 1.5, colour = "white")+
+  theme(axis.text.x=element_text(angle=90,margin = margin(.5, unit = "cm"),vjust = 1),legend.position = "none")
+
+#Plot the median data for the medianIBU
+median.Data %>% ggplot(aes(x=State))+
+  geom_bar(aes(y=medianIBU), fill="#2A3142", stat="identity")+
+  xlab("State")+
+  ylab("IBU")+
+  ggtitle("Median IBU by State")+
+  geom_text(aes(y=medianIBU, label = medianIBU), size = 1, vjust = 1.5, colour = "white")+
+  theme(axis.text.x=element_text(angle=90,margin = margin(.5, unit = "cm"),vjust = 1),legend.position = "none")
+```
+
+```{r}
+#Question_5 State with the maximum ABV and the state with the maximum IBU
+#Create a heat map for ABV
+
+BB.Data$State <- trimws(BB.Data$State, which=c("left")) #Remove the leading trail spaces from the "State" column
+str(BB.Data)
+
+ABV.Data <- BB.Data[, c(4,10)] #Create a dataframe with just the ABV data
+head(ABV.Data)
+
+#Get the state with maximum alcoholic beer
+max_ABV <- ABV.Data %>% group_by(State) %>%
+  slice_max(ABV, n=1)
+max_ABV
+
+#Remove duplicate values
+max_ABV <- distinct(max_ABV, ABV, State, .keep_all= TRUE)
+max_ABV
+
+colnames(max_ABV)[2] = "state" #change the name of column "region" to "state"
+
+#Plot ABV Data
+plot_usmap(data = max_ABV, values = "ABV") + 
+  scale_fill_gradientn(colours=rev(cm.colors(10)), na.value = "grey90") + 
+  labs(title = "Maximum ABV Beer by State")
+
+
+#Create a heat map for IBU
+IBU.Data <- BB.Data[, c(5,10)] #Create a df with just the IBU data
+head(IBU.Data)
+
+#Get the maximum value of IBU for each state
+max_IBU <- IBU.Data %>% group_by(State) %>%
+  slice_max(IBU, n=1)
+max_IBU
+
+#Remove duplicate values
+max_IBU <- distinct(max_IBU, IBU, State, .keep_all= TRUE)
+max_IBU
+
+colnames(max_IBU)[2] = "state" #change the name of column "State" to "state"
+
+plot_usmap(data = max_IBU, values = "IBU") + 
+  scale_fill_gradientn(colours=rev(terrain.colors(10)), na.value = "grey90") + 
+  labs(title = "Maximum IBU Beer by State")
+```
+
+
+```{r}
+#Question_8 KNN Model 
+set.seed(6) #Make the data reproducible. Get the same random data.
+
+#Filtered the beers that were IPA and Ale 
+BB.Data$Style = replace(BB.Data$Style, grepl("IPA", BB.Data$Style), "IPA")
+BB.Data$Style = replace(BB.Data$Style, grepl("Ale", BB.Data$Style), "Ale")
+
+IPA_Ale = BB.Data %>% filter(Style == "IPA" | Style == "Ale")
+
+#Partition the 1534 Observations into a smaller training set and testing set
+splitPerc = .75
+trainInd = sample(1:dim(IPA_Ale)[1], round(splitPerc * dim(IPA_Ale)[1]))
+train = IPA_Ale[trainInd,]
+dim(train)
+
+test = IPA_Ale[-trainInd,]
+dim(test)
+ 
+#Plot the data 
+IPA_Ale %>% ggplot(aes(x = ABV, y =IBU, color = Style)) + geom_point() + 
+  ggtitle("Style vs ABV vs IBU") + 
+  xlab("ABV")+ 
+  theme(legend.position = "none")
+
+#KNN Classification with a k = 5
+classifications = knn(train[,c(4,5)],test[,c(4,5)],train$Style, prob = TRUE, k = 5)
+table(test$Style,classifications)
+cm = confusionMatrix(table(test$Style,classifications))
+cm
+```
+
+

@@ -1,0 +1,169 @@
+---
+title: "FLS_8_Simi Rmd"
+author: "Simi"
+date: '2023-07-01'
+
+output:
+  word_document: default
+  html_document: default
+
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+
+
+```{r}
+
+
+
+Beers = read.csv(file.choose(),header = TRUE)
+
+Breweries = read.csv(file.choose(),header = TRUE)
+
+#Question 1.	How many breweries are present in each state?
+# Load the dplyr package
+library(dplyr)
+library(ggplot2)
+
+# Assuming your dataset is named "breweries", use group_by and summarise to count breweries per state
+Breweries_per_state <- Breweries %>%
+  group_by(State) %>%
+  dplyr::summarise(Count = n())
+
+# Sort the breweries in descending order
+Breweries_per_state <- Breweries_per_state %>%
+  arrange(desc(Count))
+
+# Create a bar plot using ggplot
+ggplot(data = Breweries_per_state, aes(x = State, y = Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Number of Breweries per State",
+       x = "State",
+       y = "Count")
+
+```
+
+
+
+
+
+```{r}
+
+#Qn 6.	Comment on the summary statistics and distribution of the ABV variable.
+
+BeersData <- Breweries %>%
+  left_join(Beers, by = c("Brew_ID" = "Brewery_id"))
+summary(BeersData$ABV)
+#summary(filtered_data$ABV)
+sd(BeersData$ABV)
+
+
+# Create mode() function to calculate mode
+mode <- function(x, na.rm = FALSE) {
+  
+  if(na.rm){ #if na.rm is TRUE, remove NA values from input x
+    x = x[!is.na(x)]
+  }
+  
+  val <- unique(x)
+  return(val[which.max(tabulate(match(x, val)))])
+}
+
+mode(BeersData$ABV)
+
+
+#density plot
+ggplot(BeersData, aes(x = ABV)) +
+  geom_density(color = "black", fill = "blue", alpha = 0.5) +
+  labs(x = "Alchohol Content", y = "Density", title = "Density Plot of ABV")
+```
+
+```{r}
+
+#Question 7.	Is there an apparent relationship between the bitterness of the beer and its alcoholic content? 
+#Draw a scatter plot.  Make your best judgment of a relationship and EXPLAIN your answer.
+
+# Filtering out zero values for alcohol_content and bitterness
+library(plotly)
+filtered_data <- BeersData[BeersData$ABV != 0 & BeersData$IBU != 0, ]
+
+ggplot(filtered_data, aes(x = ABV, y = IBU)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Alcohol Content", y = "Bitterness", title = "Scatter Plot of Alcohol Content vs. Bitterness")
+
+scatter_plot <- ggplot(filtered_data, aes(x = ABV, y = IBU, text = Name.y)) +
+  geom_point() + geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Alcohol Content", y = "Bitterness", title = "Scatter Plot of Alcohol Content vs. Bitterness (excluding zeros)")
+
+interactive_plot <- ggplotly(scatter_plot)
+interactive_plot
+
+cor(filtered_data$ABV, filtered_data$IBU)
+
+# Use knn to investigate the difference with respect to IBU and ABV between IPAs (India Pale Ales) 
+#and other types of Ale (any beer with “Ale” in its name other than IPA)
+library(e1071)
+library(class)
+library(dplyr)
+library(caret)
+filtered_data <- filtered_data %>% mutate(type = ifelse (grepl('IPA', Style), "IPA", "Other"))
+filtered_data$type = replace(filtered_data$type , grepl('Ale', filtered_data$Style), "Ale")
+IPA_Ale <- filtered_data[filtered_data$type != "Other", ]
+
+
+ggplot(IPA_Ale, aes(x = ABV, y = IBU, color = type)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Alcohol Content", y = "Bitterness", title = "Scatter Plot of Alcohol Content vs. Bitterness")
+
+predictors <- IPA_Ale %>% select(IBU, ABV)
+response <- IPA_Ale$type
+
+k <- 5  # Number of nearest neighbors
+train_indices <- sample(1:nrow(IPA_Ale), nrow(IPA_Ale) * 0.7)
+train_data <- IPA_Ale[train_indices, ]
+test_data <- IPA_Ale[-train_indices, ]
+
+knn_result <- knn(train = train_data %>% select(IBU, ABV), test = test_data %>% select(IBU, ABV), cl = train_data$type, k = k)
+accuracy <- mean(knn_result == test_data$type)
+print(paste("Accuracy:", accuracy))
+tbl_knn = table(test_data$type, knn_result)
+CM = confusionMatrix(tbl_knn)
+print(CM)
+```
+
+
+
+
+
+
+
+
+
+

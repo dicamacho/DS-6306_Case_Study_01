@@ -1,0 +1,182 @@
+---
+title: "FLS_8 Working"
+author: "David"
+date: '2023-06-17'
+output:
+  word_document: default
+  html_document: default
+---
+
+Load Necessary Packages
+```{r}
+# install.packages("naniar")
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(naniar)
+#install.packages("ggsn")
+#install.packages("usmap")
+library(class)
+library(caret)
+library(e1071)
+library(tm)
+#library(plyr)
+#library(tidyverse)
+library(mapproj)
+library(maps)
+library(stringr)
+library(knitr)
+library(ggsn)
+library(usmap)
+
+
+```
+
+We loaded the data sets and inspected their column types, analyzed useful metrics, and returned the first few observations to ensure the data was loaded correctly and to get a feel for the data
+```{r}
+breweries = read.csv(file.choose(), header = TRUE)
+beers = read.csv(file.choose(), header = TRUE)
+
+
+str(breweries)
+str(beers)
+
+head(breweries)
+head(beers)
+
+summary(breweries)
+summary(beers)
+
+select(beers)
+```
+
+1. How many breweries are present in each state?
+Below we find an overview of the number of breweries for each state
+  Colorado is the clear leader with 47 breweries followed by California and Michigan with 39     and 37, respectively
+  7 states are in the 20s
+  9 states are in the 10s
+  and the remaining have 9 and below 
+```{r}
+
+# Grouping data set by state to obtain number of breweries
+breweriesByState <- breweries %>% 
+  group_by(State) %>%
+  dplyr::summarise(count = n()) %>%
+  arrange(desc(count))
+
+# Plotting data
+breweriesByState %>%
+  ggplot(aes(x = reorder(State, -count), y = count)) +
+  geom_bar(stat = "identity", fill = "steelblue", width = 1, color = "black") +
+  geom_text(aes(label = count), vjust = -0.5, size = 2.5) +
+  xlab("State") +
+  ylab("Count of Breweries") +
+  ggtitle("Breweries by State") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+
+2.We examined the data sets by looking at the first and last observations
+```{r}
+#Question_2 Merge Beer Data with Brewery Data; Outer Join
+BB.Data = merge(beers, breweries, by.x="Brewery_id", by.y="Brew_ID", all=TRUE)
+head(BB.Data)
+tail(BB.Data)
+```
+
+
+
+
+3. Address the missing values in each column
+Below we explore missing values via the naniar package
+  After exploring that IBU has a large amount of missing values,
+  we decided to dig deeper and see which observations had missing values
+  based on the vis_miss plot, it seems the IBU values are randomly missing because
+  they are distributed normally across the whole data set.
+  The same seems true for ABV although it only accounts for 3% of the data set.
+  After joining on state.
+  Next, we used the gg_miss_upset function to visualize patterns of missingness, or rather the   combination and intersection
+  of missingness across cases. 
+  There were 62 observations that were both missing an IBU and ABV value
+  We've come to the conclusion that the missing values are type MCAR (missing completely at      random.)
+```{r}
+
+
+gg_miss_var(beers) +
+  ggtitle("Missing Data by Variable") +
+  theme_bw() +  # Set a minimal theme
+  theme(plot.title = element_text(size = 16, face = "bold"),  # Customize title
+        axis.text = element_text(size = 12),  # Customize axis text
+        axis.title = element_text(size = 14),  # Customize axis title
+        legend.title = element_blank(),  # Hide legend title
+        legend.text = element_text(size = 12))  # Customize legend text
+
+# To see if the values are distributed randomly across the data set
+vis_miss(beers) +
+  theme_bw() +
+  ggtitle("Distribution of Missing Data")
+
+df <- left_join(breweries, beers, by = c("Brew_ID" = "Brewery_id"))
+  
+# To see combination and intersections
+gg_miss_upset(df) 
+
+# gg_miss to see distribution of missing abv v ibu correlation
+df %>% ggplot(aes(x = ABV, y = IBU)) +
+  geom_miss_point() +
+  theme_bw() +
+  ggtitle(label = "Distribution of Missing Values", subtitle = "ABV v IBU")
+
+# gg_miss to see distribution of missing abv v ibu correlation
+df %>% ggplot(aes(x = ABV, y = IBU)) +
+  geom_miss_point() +
+  theme_bw() +
+  ggtitle(label = "Distribution of Missing Values by State", subtitle = "ABV v IBU") +
+  facet_wrap(~State)
+```
+
+
+
+8. Building a KNN to see the relationship between beer type with respect to ABV and IBU. First, we broke up the style between "IPA" and "Other" and assigned them to an additional column labeled "type". Then we created a 70/30 train/test set based on the beers.csv. We excluded NAs on ABV and IBU to get a more accurate representation.Then, we set an iteration to test the k parameter and see what iteration provided the best accuracy. After running it multiple times, we've determined that the accuracy is best achieved between k = 30 and 80.
+```{r}
+library(class)
+library(caret)
+library(e1071)
+library(dplyr)
+
+#distinguishing between IPA and other
+beers <- beers %>% mutate(type = ifelse(grepl('IPA', Style), "IPA", "Other"))
+
+head(beers)
+
+# Setting percentage of .70 for train
+perc = .7
+trainIndices = sample(1:dim(beers)[1],round(perc * dim(beers)[1]))
+train = beers[trainIndices,] # Assigning 70% of beers to train
+test = beers[-trainIndices,] # Assigning other 30% of beers to test
+
+train = train %>% filter(is.na(ABV) == FALSE & is.na(IBU) == FALSE) #excluding NAs
+test = test %>% filter(is.na(ABV) == FALSE & is.na(IBU) == FALSE) #exclusing NAs
+
+accs = data.frame(accuracy = numeric(100), k = numeric(100)) # making accuracy data frame
+
+for(i in 1:100) #iterating over 1-90 k's
+{
+  # setting the classifications based on train and test
+  classifications = knn(train[,c(3,4)],test[,c(3,4)],train$type, prob = TRUE, k = i)
+  # returning table to see which ones were right and wrongs
+  table(test$type,classifications)
+  # returning confusion matrix to get overall stats
+  CM = confusionMatrix(table(test$type,classifications))
+  # assigning accuracy at iteration i from overall score
+  accs$accuracy[i] = CM$overall[1]
+  # assigning iteration i to k at [i]
+  accs$k[i] = i
+}
+
+# plotting accuracy of k
+plot(accs$k,accs$accuracy, type = "l", xlab = "k",  main = "Accuracy of K")
+
+```
